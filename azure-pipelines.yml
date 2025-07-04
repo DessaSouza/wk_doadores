@@ -15,16 +15,13 @@ steps:
     installationPath: $(Agent.ToolsDirectory)/dotnet
 
 - script: |
-    cd back
-    dotnet restore
+    dotnet restore back/wk_doadores.csproj
   displayName: 'Restore dependencies'
 
 - script: |
-    cd back
-    dotnet build --configuration $(buildConfiguration)
+    dotnet build back/wk_doadores.csproj --configuration $(buildConfiguration)
   displayName: 'Build project'
 
 - script: |
-    cd back
-    dotnet test --configuration $(buildConfiguration) --no-build --verbosity normal
+    dotnet test back/wk_doadores.csproj --configuration $(buildConfiguration) --no-build --verbosity normal
   displayName: 'Run unit tests'
