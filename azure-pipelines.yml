@@ -1,67 +1,59 @@
 trigger:
-- main
+  - main
 
-# Variaveis 
+pool:
+  vmImage: 'ubuntu-latest'
+
 variables:
-  solution: 'back/WK_Doador.sln' 
   buildConfiguration: 'Release'
+  azureSubscription: 'prj-bes-7b-e03-connection'  # Nome da sua Service Connection
+  appName: 'droops-api-develop-andressa'          # Nome do App Service existente
+  mysqlConnectionString: '$(ConnectionStrings.DefaultConnection)'  # Variável segura (definida no Azure DevOps)
 
-#Build.
-stages:
-- stage: Build
-  displayName: 'Compilar e Testar o projeto'
-  jobs:
-  - job: BuildJob
-    displayName: 'Build, Test and Publish'
-    pool:
-      vmImage: 'ubuntu-latest' 
-    steps:
-    
-    #versão do .NET SDK 
-    - task: UseDotNet@2
-      displayName: 'Usar .NET 7.0.x'
-      inputs:
-        packageType: 'sdk'
-        version: '7.0.x'
+steps:
+  # Restaurar dependências
+  - task: DotNetCoreCLI@2
+    displayName: 'Restaurar pacotes'
+    inputs:
+      command: 'restore'
+      projects: 'back/**/*.csproj'
 
-    # Restaura dependências 
-    - task: DotNetCoreCLI@2
-      displayName: 'Restaurar dependências'
-      inputs:
-        command: 'restore'
-        projects: '$(solution)' 
+  # Build
+  - task: DotNetCoreCLI@2
+    displayName: 'Build'
+    inputs:
+      command: 'build'
+      arguments: '--configuration $(buildConfiguration)'
+      projects: 'back/**/*.csproj'
 
-    # Compila o projeto
-    - task: DotNetCoreCLI@2
-      displayName: 'Compilar a solution'
-      inputs:
-        command: 'build'
-        projects: '$(solution)'
-        arguments: '--configuration $(buildConfiguration)' 
+  # Testes
+  - task: DotNetCoreCLI@2
+    displayName: 'Executar testes'
+    inputs:
+      command: 'test'
+      arguments: '--configuration $(buildConfiguration) --logger trx'
+      projects: 'back/**/*.csproj'
 
-    # testes unitários
-    - task: DotNetCoreCLI@2
-      displayName: 'Executar testes unitários'
-      inputs:
-        command: 'test'
-        projects: '$(solution)'
-        arguments: '--configuration $(buildConfiguration) --no-build'
-        publishTestResults: true 
+  # Publicar artefato
+  - task: DotNetCoreCLI@2
+    displayName: 'Publicar aplicação'
+    inputs:
+      command: 'publish'
+      arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+      projects: 'back/**/*.csproj'
+      zipAfterPublish: true
 
-    #Publica o artefato da API
-    - task: DotNetCoreCLI@2
-      displayName: 'Publicar projeto da API'
-      inputs:
-        command: 'publish'
-        publishWebProjects: false 
-        projects: 'back/src/WK.Api/WK.Api.csproj' 
-        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
-        zipAfterPublish: true 
+  # Deploy no App Service
+  - task: AzureWebApp@1
+    displayName: 'Deploy no Azure'
+    inputs:
+      azureSubscription: $(azureSubscription)
+      appName: $(appName)
+      package: '$(Build.ArtifactStagingDirectory)/**/*.zip'
+      runtimeStack: 'DOTNETCORE|LTS'
 
-    # Publica o arquivo .zip 
-    - task: PublishBuildArtifacts@1
-      displayName: 'Publicar Artefato para o Deploy'
-      inputs:
-        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-        ArtifactName: 'drop' 
-        publishLocation: 'Container'
+  # Executar migrações do MySQL
+  - script: dotnet ef database update --project back/
+    displayName: 'Aplicar migrações do MySQL'
+    env:
+      ConnectionStrings__DefaultConnection: $(mysqlConnectionString)
