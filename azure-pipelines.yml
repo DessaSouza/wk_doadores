@@ -1,27 +1,67 @@
 trigger:
 - main
 
-pool:
-  vmImage: 'ubuntu-latest'
-
+# Variaveis que serão usadas no pipeline
 variables:
+  solution: '**/WK_Doador.sln' # Encontra o arquivo da solution automaticamente
   buildConfiguration: 'Release'
 
-steps:
-- task: UseDotNet@2
-  inputs:
-    packageType: 'sdk'
-    version: '7.0.x'
-    installationPath: $(Agent.ToolsDirectory)/dotnet
+# O pipeline é dividido em estágios (Stages). O primeiro é o de Build.
+stages:
+- stage: Build
+  displayName: 'Compilar e Testar o projeto'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build, Test and Publish'
+    pool:
+      vmImage: 'ubuntu-latest' # Máquina virtual que executará os passos
+    steps:
+    
+    # 1. Define a versão do .NET SDK a ser usada
+    - task: UseDotNet@2
+      displayName: 'Usar .NET 7.0.x'
+      inputs:
+        packageType: 'sdk'
+        version: '7.0.x'
 
-- script: |
-    dotnet restore back/Back.csproj
-  displayName: 'Restore dependencies'
+    # 2. Restaura as dependências do projeto (pacotes NuGet)
+    - task: DotNetCoreCLI@2
+      displayName: 'Restaurar dependências'
+      inputs:
+        command: 'restore'
+        projects: '$(solution)' # Usa a variável com o caminho da solution
 
-- script: |
-    dotnet build back/Back.csproj --configuration $(buildConfiguration)
-  displayName: 'Build project'
+    # 3. Compila o projeto
+    - task: DotNetCoreCLI@2
+      displayName: 'Compilar a solution'
+      inputs:
+        command: 'build'
+        projects: '$(solution)'
+        arguments: '--configuration $(buildConfiguration)' # Usa a variável de Release
 
-- script: |
-    dotnet test back/Back.csproj --configuration $(buildConfiguration) --no-build --verbosity normal
-  displayName: 'Run unit tests'
+    # 4. Roda os testes unitários
+    - task: DotNetCoreCLI@2
+      displayName: 'Executar testes unitários'
+      inputs:
+        command: 'test'
+        projects: '$(solution)' # O comando test encontra o projeto de teste automaticamente
+        arguments: '--configuration $(buildConfiguration) --no-build'
+        publishTestResults: true # Publica os resultados dos testes na interface do Azure DevOps
+
+    # 5. Publica o artefato da API (prepara para o deploy)
+    - task: DotNetCoreCLI@2
+      displayName: 'Publicar projeto da API'
+      inputs:
+        command: 'publish'
+        publishWebProjects: false # Publicaremos um projeto específico
+        projects: 'back/src/WK.Api/WK.Api.csproj' # Caminho correto para o projeto da API
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+        zipAfterPublish: true # Gera um .zip, que é ideal para o deploy
+
+    # 6. Publica o arquivo .zip como um "artefato" do build
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publicar Artefato para o Deploy'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop' # Nome do artefato
+        publishLocation: 'Container'
